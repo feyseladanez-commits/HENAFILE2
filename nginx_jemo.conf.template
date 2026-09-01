@@ -1,0 +1,48 @@
+# -----------------------------------------------------------------------
+# Nginx config for the Jemo multi-host bot platform.
+#
+# WHY THIS IS NEEDED
+# Each host's bot process listens for its SMS-forwarder webhook on
+# 127.0.0.1:<webhook_port> ONLY (never on a public interface - see
+# WEBHOOK_HOST in jemo_2.py). Nginx is what makes that endpoint reachable
+# from the internet, with TLS, at a stable public URL - e.g.
+#   https://sms.yourdomain.com/H1/sms-webhook
+# which is the URL you paste into the SMS-forwarder app on each host's
+# phone (with the ?token=... from that host's WEBHOOK_SECRET, if you
+# customize it per host).
+#
+# SETUP
+# 1) Copy this file to /etc/nginx/sites-available/jemo and replace
+#    sms.yourdomain.com with your real domain (must point at this VPS).
+# 2) Run `sudo certbot --nginx -d sms.yourdomain.com` (see DEPLOY.md) to
+#    get a free HTTPS certificate - certbot will edit the `listen`/`ssl_*`
+#    lines here automatically, so start with the plain HTTP version below.
+# 3) Every time you register a new host with /newhost in the Super Admin
+#    bot, run `deploy/add_host_nginx.sh <HOST_ID> <WEBHOOK_PORT>` (get
+#    the webhook port from `/host <HOST_ID>` in the Super Admin bot) to
+#    append its location block below and reload nginx - or add the
+#    `location /HOST_ID/sms-webhook { ... }` block by hand.
+# -----------------------------------------------------------------------
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name sms.yourdomain.com;
+
+    # --- Host location blocks - one per registered host ---------------
+    # add_host_nginx.sh appends new blocks just above this marker, do
+    # not remove the marker comment.
+    # === JEMO_HOST_BLOCKS_START ===
+    # location /H1/sms-webhook {
+    #     proxy_pass http://127.0.0.1:9001/sms-webhook;
+    #     proxy_set_header Host $host;
+    #     proxy_set_header X-Real-IP $remote_addr;
+    #     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    #     proxy_set_header X-Forwarded-Proto $scheme;
+    # }
+    # === JEMO_HOST_BLOCKS_END ===
+
+    location / {
+        return 404;
+    }
+}

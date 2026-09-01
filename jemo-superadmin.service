@@ -1,0 +1,29 @@
+[Unit]
+Description=Jemo Super Admin Telegram bot (multi-host lottery platform)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jemo
+Group=jemo
+WorkingDirectory=/opt/jemo
+EnvironmentFile=/opt/jemo/.env
+ExecStart=/opt/jemo/venv/bin/python3 /opt/jemo/superadmin_all_in_one.py
+Restart=always
+RestartSec=5
+# Give the process a bit of time to save state (atomic writes to
+# lottery_state.json / superadmin_state.json) before it's killed.
+TimeoutStopSec=20
+KillSignal=SIGINT
+
+# Basic hardening (safe defaults for a bot that only needs its own
+# working directory + outbound network + localhost ports)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/jemo
+
+[Install]
+WantedBy=multi-user.target
