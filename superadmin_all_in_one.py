@@ -81,9 +81,16 @@ API_HOST = os.environ.get("SUPERADMIN_API_HOST", "127.0.0.1")
 API_PORT = int(os.environ.get("SUPERADMIN_API_PORT", "8091"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOSTS_DIR = os.path.join(BASE_DIR, "hosts")
-STATE_FILE = os.path.join(BASE_DIR, "superadmin_state.json")
+# All persistent data (the super-admin state file + every host's own state)
+# lives under DATA_DIR. Defaults to sitting next to the script, but can be
+# pointed at a separate persistent volume/mount (e.g. a dedicated data disk
+# on your server) via SUPERADMIN_DATA_DIR, so a redeploy or a rebuild of
+# BASE_DIR never touches it.
+DATA_DIR = os.environ.get("SUPERADMIN_DATA_DIR", BASE_DIR)
+HOSTS_DIR = os.path.join(DATA_DIR, "hosts")
+STATE_FILE = os.path.join(DATA_DIR, "superadmin_state.json")
 
+os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(HOSTS_DIR, exist_ok=True)
 
 # Per-host port ranges so each dynamically-launched jemo_2 instance gets its
@@ -6821,16 +6828,23 @@ def save_state():
             hid: {k: v for k, v in h.items() if k not in ("running", "last_error")}
             for hid, h in hosts.items()
         }
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                {
-                    "hosts": persistable_hosts,
-                    "credit_requests": credit_requests,
-                    "host_signup_requests": host_signup_requests,
-                    "counters": _counters,
-                },
-                f, ensure_ascii=False, indent=2,
-            )
+        data = {
+            "hosts": persistable_hosts,
+            "credit_requests": credit_requests,
+            "host_signup_requests": host_signup_requests,
+            "counters": _counters,
+        }
+        # Atomic write: write to a temp file in the same directory, flush +
+        # fsync it to disk, then os.replace() into place. os.replace() is
+        # atomic on POSIX and Windows, so a crash/power loss/reboot at any
+        # point during the write can never leave STATE_FILE half-written or
+        # corrupted — you either keep the old file or get the fully new one.
+        tmp_path = STATE_FILE + ".tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, STATE_FILE)
     except Exception as e:
         log.error(f"save_state error: {e}")
 
