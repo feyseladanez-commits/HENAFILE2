@@ -81,10 +81,47 @@ API_HOST = os.environ.get("SUPERADMIN_API_HOST", "127.0.0.1")
 API_PORT = int(os.environ.get("SUPERADMIN_API_PORT", "8091"))
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOSTS_DIR = os.path.join(BASE_DIR, "hosts")
-STATE_FILE = os.path.join(BASE_DIR, "superadmin_state.json")
+
+# --- Where persistent data (state files, per-host folders) actually lives ---
+# IMPORTANT: on most "cloud app" / PaaS platforms, redeploying (pushing a
+# fresh copy of the code) tears down the old container/filesystem and builds
+# a new one from your source. Anything written to plain local disk -- which
+# is what happens by default here -- gets wiped along with it, UNLESS it
+# lives on a *persistent volume/disk* that the platform explicitly keeps
+# across deploys and you've attached to your app.
+#
+# DATA_DIR defaults to BASE_DIR (old behavior, so nothing breaks if you
+# don't set it) -- but that means your data sits inside the same folder
+# that gets replaced on every deploy, which is exactly what's wiping it.
+#
+# Fix: look in your hosting platform's dashboard for something called
+# "persistent disk", "volume", "storage", or similar, attach one, note the
+# mount path it gives you (e.g. "/data"), and set the environment variable
+# DATA_DIR to that path. Everything below (HOSTS_DIR, STATE_FILE, and every
+# per-host lottery_state.json under hosts/<HOST_ID>/) will then live there
+# instead, and will survive future "replace the whole code" redeploys.
+#
+# If your platform genuinely has no persistent-storage option at all, plain
+# files can never survive a full redeploy there no matter what DATA_DIR is
+# set to -- the real fix in that case is moving state into an external
+# database instead of local JSON files, which is a bigger change (ask if
+# you want that built).
+DATA_DIR = os.environ.get("DATA_DIR", BASE_DIR)
+HOSTS_DIR = os.path.join(DATA_DIR, "hosts")
+STATE_FILE = os.path.join(DATA_DIR, "superadmin_state.json")
 
 os.makedirs(HOSTS_DIR, exist_ok=True)
+if DATA_DIR == BASE_DIR:
+    print(
+        f"⚠️  DATA_DIR is not set -- data is stored inside the app's own code "
+        f"folder ({BASE_DIR}), which most cloud platforms replace on every "
+        f"redeploy. Set the DATA_DIR environment variable to a persistent "
+        f"volume/disk path if your platform offers one, or your saved data "
+        f"will keep disappearing on redeploy."
+    )
+else:
+    print(f"📁 Using persistent DATA_DIR: {DATA_DIR}")
+
 
 # Per-host port ranges so each dynamically-launched jemo_2 instance gets its
 # own Host-Control-API port and its own SMS-webhook port without clashing.
