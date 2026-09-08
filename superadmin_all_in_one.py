@@ -8,6 +8,14 @@ import secrets
 from datetime import datetime
 
 try:
+    from dotenv import load_dotenv
+    load_dotenv()  # reads .env in the working directory, if present
+except ModuleNotFoundError:
+    print("⚠️  'python-dotenv' not installed — .env file will NOT be loaded automatically.")
+    print("👉 pip install python-dotenv")
+    print("   (or export the variables manually before running)")
+
+try:
     import aiohttp
     from aiohttp import web
 except ModuleNotFoundError:
@@ -47,8 +55,14 @@ log = logging.getLogger("superadmin")
 # ማስታወሻ፦ ሁሉም ሆስቶች 1 ፕሮሰስ ውስጥ ስለሚጋሩ፣ አንድ ሆስት ላይ ያልተጠበቀ ስህተት ቢፈጠር
 # ሌሎቹን እንዳያቆም እያንዳንዱ ሆስት instance በራሱ try/except ውስጥ ተጠቅልሎ ይነሳል።
 
-SUPER_BOT_TOKEN = os.environ.get("SUPERADMIN_BOT_TOKEN", "8764160656:AAH05PJHq0kKZrUghV5nSrGjyAXK8JTKaJ8")
+SUPER_BOT_TOKEN = os.environ.get("SUPERADMIN_BOT_TOKEN", "")
 SUPER_ADMIN_ID = int(os.environ.get("SUPER_ADMIN_ID", "5094744004"))
+
+if not SUPER_BOT_TOKEN:
+    print("❌ SUPERADMIN_BOT_TOKEN environment variable is not set.")
+    print("👉 Set it before starting the bot, e.g.:")
+    print("   export SUPERADMIN_BOT_TOKEN=your_real_token_here")
+    raise SystemExit(1)
 
 # --- Credit Seller (Super Admin) payment account --------------------------
 # This is where EVERY host sends money when they top up credit via
@@ -8986,6 +9000,25 @@ def _find_host_by_id_and_secret(host_id, secret):
     return host
 
 
+# --- Simple in-memory rate limiting for the HTTP API -----------------------
+# Keyed by (client_ip, host_id) so one host's requests can't drown out
+# another's, and so a leaked host_api_secret can't be used to flood the API.
+_api_rate_limit_hits = {}  # key -> list[timestamp]
+_API_RATE_LIMIT_MAX = 10        # max requests
+_API_RATE_LIMIT_WINDOW = 60     # per this many seconds
+
+
+def _is_rate_limited(key):
+    now = datetime.now().timestamp()
+    hits = _api_rate_limit_hits.setdefault(key, [])
+    # Drop timestamps outside the current window
+    hits[:] = [t for t in hits if now - t < _API_RATE_LIMIT_WINDOW]
+    if len(hits) >= _API_RATE_LIMIT_MAX:
+        return True
+    hits.append(now)
+    return False
+
+
 async def api_request_credit(request: web.Request):
     token = request.headers.get("X-Request-API-Key")
     try:
@@ -8994,6 +9027,10 @@ async def api_request_credit(request: web.Request):
         data = {}
 
     host_id = str(data.get("host_id", "")).upper()
+
+    if _is_rate_limited((request.remote, host_id, "request_credit")):
+        return web.json_response({"ok": False, "error": "rate limited, try again shortly"}, status=429)
+
     host = _find_host_by_id_and_secret(host_id, token)
     if not host:
         return web.json_response({"ok": False, "error": "unauthorized or unknown host_id"}, status=401)
@@ -9036,6 +9073,10 @@ async def api_request_host_signup(request: web.Request):
         data = {}
 
     host_id = str(data.get("host_id", "")).upper()
+
+    if _is_rate_limited((request.remote, host_id, "request_host_signup")):
+        return web.json_response({"ok": False, "error": "rate limited, try again shortly"}, status=429)
+
     host = _find_host_by_id_and_secret(host_id, token)
     if not host:
         return web.json_response({"ok": False, "error": "unauthorized or unknown host_id"}, status=401)
